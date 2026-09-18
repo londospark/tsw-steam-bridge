@@ -7,21 +7,28 @@
 //! loop — see README "Known gaps". Drag panel tabs to rearrange/dock them;
 //! layout is not currently persisted between runs.
 //!
-//! Theming: colors are read at startup from Omarchy's *current* theme
-//! (`~/.local/state/omarchy/current/theme/colors.toml`) rather than
+//! Theming: on Linux, colors are read at startup from Omarchy's *current*
+//! theme (`~/.local/state/omarchy/current/theme/colors.toml`) rather than
 //! hardcoded, so the panel follows whatever theme is active system-wide.
-//! The font is not auto-detected here (Omarchy's font tracker is
-//! monospace-only and shelling out to `fc-match` isn't worth the
-//! complexity inside this binary) — pass `--font-file` yourself, e.g.:
+//! Elsewhere (Windows, macOS, or Linux without Omarchy) there's nothing to
+//! read, so it falls back to the colors compiled into `Palette`'s
+//! defaults — pass `--theme-file` to point at any colors.toml-shaped file
+//! instead.
 //!
-//!   ./zig-out/bin/tsw-gui --font-file "$(fc-match -f '%{file}' "$(omarchy font current)")"
-//!
-//! `scripts/run-gui.sh` does exactly this and is the normal way to launch it.
+//! Fonts: bundled (JetBrains Mono, SIL OFL 1.1 — see
+//! src/assets/fonts/LICENSE-JetBrainsMono.txt) and embedded into the binary,
+//! so it looks right with zero setup on every platform. On Linux, run via
+//! `scripts/run-gui.sh` instead if you'd rather it match your current
+//! Omarchy font (`omarchy font current` -> `fc-match`); pass `--font-file
+//! <path-to-a-ttf-or-otf>` yourself for anything else.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const zgui = @import("zgui");
 const zglfw = @import("zglfw");
 const zopengl = @import("zopengl");
+
+const default_font_ttf = @embedFile("assets/fonts/JetBrainsMono-Regular.ttf");
 
 // NOTE: do not declare our own `extern fn glViewport`/`glClear`/etc. here.
 // zgui's OpenGL3 backend is built with IMGUI_IMPL_OPENGL_LOADER_CUSTOM,
@@ -210,10 +217,13 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     var font_file: ?[:0]const u8 = null;
-    var theme_path: []const u8 = init.environ_map.get("HOME") orelse "";
-    const default_theme_suffix = "/.local/state/omarchy/current/theme/colors.toml";
-    const theme_path_buf = try std.fmt.allocPrint(arena, "{s}{s}", .{ theme_path, default_theme_suffix });
-    theme_path = theme_path_buf;
+    // Omarchy only exists on Linux; on other platforms there's nothing to
+    // look for, so skip straight to the compiled-in fallback palette
+    // instead of trying (and failing) to read a Linux-shaped path.
+    var theme_path: ?[]const u8 = if (builtin.os.tag == .linux) blk: {
+        const home = init.environ_map.get("HOME") orelse break :blk null;
+        break :blk try std.fmt.allocPrint(arena, "{s}/.local/state/omarchy/current/theme/colors.toml", .{home});
+    } else null;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -226,7 +236,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    const palette = loadPalette(arena, io, theme_path);
+    const palette = if (theme_path) |p| loadPalette(arena, io, p) else Palette{};
 
     try zglfw.init();
     defer zglfw.terminate();
@@ -255,8 +265,10 @@ pub fn main(init: std.process.Init) !void {
     if (font_file) |path| {
         _ = zgui.io.addFontFromFile(path, 18.0);
     } else {
-        std.debug.print("note: no --font-file given, using ImGui's built-in default font\n", .{});
-        _ = zgui.io.addFontDefault(null);
+        // Bundled so the GUI looks right out of the box on every platform
+        // with zero setup — no font-matching shell pipeline required.
+        // See src/assets/fonts/LICENSE-JetBrainsMono.txt (SIL OFL 1.1).
+        _ = zgui.io.addFontFromMemory(default_font_ttf, 18.0);
     }
 
     zgui.backend.init(window);

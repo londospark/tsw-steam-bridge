@@ -133,13 +133,19 @@ representative layout (Controller / Locomotive / TSW API panels) but isn't
 wired to a live `steam-bridge` poll loop yet — that's the natural next step
 once Steam Input manifest activation (above) is sorted out.
 
-Theming reads Omarchy's *current* theme colors live from
+Runs with zero setup on any platform: `./zig-out/bin/tsw-gui` (or
+`tsw-gui.exe` on Windows) alone is enough. Fonts (JetBrains Mono, SIL OFL
+1.1 — see `src/assets/fonts/LICENSE-JetBrainsMono.txt`) are embedded
+directly into the binary, so there's no font file to find at runtime.
+
+On Linux, theming reads Omarchy's *current* theme colors live from
 `~/.local/state/omarchy/current/theme/colors.toml` at startup (not
 hardcoded, so it follows whatever theme is active), mapped onto ImGui's
-full `StyleCol` palette. The font isn't auto-detected inside the binary —
-pass `--font-file` yourself, or just use `scripts/run-gui.sh`, which
-resolves your current Omarchy font (`omarchy font current` -> `fc-match`)
-and launches with it:
+full `StyleCol` palette; elsewhere it falls back to the same defaults
+Omarchy's Coaster theme happens to use. Pass `--theme-file`/`--font-file`
+to point at your own files instead, or on Linux use `scripts/run-gui.sh`,
+which resolves your current Omarchy font (`omarchy font current` ->
+`fc-match`) and launches with it:
 
 ```sh
 ./scripts/run-gui.sh
@@ -176,6 +182,38 @@ zig build run-bridge -- --key-file /path/to/CommAPIKey.txt
 zig build run-gui                    # or: ./scripts/run-gui.sh
 ```
 
+### Platform support
+
+Not just an Omarchy thing — this builds for Windows and macOS too:
+
+```sh
+zig build -Dtarget=x86_64-windows-gnu
+zig build -Dtarget=x86_64-macos
+```
+
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| `tsw-cli` | yes, verified | cross-compiles cleanly | cross-compiles cleanly |
+| `steam-bridge` | yes, verified against a real Steam client | cross-compiles cleanly (untested at runtime) | cross-compiles cleanly (untested at runtime) |
+| `tsw-gui` | yes, verified | cross-compiles cleanly (untested at runtime) | **doesn't cross-compile from Linux** — zgui's own build script doesn't wire up macOS SDK framework paths for that; should be fine building natively on an actual Mac, just not from here |
+
+Cross-compiling Windows/macOS `steam-bridge`/`tsw-gui` needs `vendor/sdk/`
+to contain that platform's redistributable too (`redistributable_bin/win64/`
+or `redistributable_bin/osx/`) — already true if you extracted the full
+`steamworks_sdk.zip` or pulled via `scripts/fetch-sdk.sh`, since both
+include every platform. The build copies the matching `.dll`/`.dylib`
+next to the built binary automatically.
+
+Windows/macOS builds are verified by cross-compiling successfully (real
+PE32+/Mach-O binaries come out, `zig build test` passes), not by actually
+running them on that OS — there's no Windows or macOS machine in this
+project's development loop. If something's off at runtime there, it's
+likely one of: the Steamworks calling convention/struct packing in
+`src/steam/ffi.zig` (should be fine — Zig's `callconv(.c)` picks the
+correct ABI per target automatically, and this was written from and
+matches the SDK headers directly, not guessed), or something specific to
+`zgui`/`zglfw`'s own platform code, which is out of this project's hands.
+
 ### Vendoring the Steamworks SDK
 
 If you're the project owner setting up another machine you control, with
@@ -192,20 +230,22 @@ it) and extract it so `vendor/sdk/public/...` and
 this (public) repo — it's a large, license-encumbered redistributable,
 not project source, so it isn't published here.
 
-### A note on this machine's linker
+### A note on Linux's linker specifically
 
 Zig 0.16.0's self-hosted ELF linker can't yet handle the `.sframe` unwind
 sections that current glibc/gcc emit into `crt1.o` (reproduced independent
 of this project — any libc-linked Zig binary fails with `fatal linker
 error: unhandled relocation type R_X86_64_PC64 ... .sframe` here). The
-system linker (via `cc`/`c++`) handles it fine, so `build.zig` builds
-`steam-bridge` and `tsw-gui` as `.o`/`.a` artifacts with `zig build-obj`
-and links the final binaries by shelling out to `cc` (`c++` for `tsw-gui`,
-since it links C++ object code from imgui and needs libstdc++ pulled in)
-instead of `b.addExecutable`'s normal path. `tsw-cli` doesn't need libc at
-all, so it's unaffected and links normally. Revisit the `have_sdk` branch
-and the `tsw-gui` block in `build.zig` once Zig's linker supports SFrame
-relocations upstream.
+system linker (via `cc`/`c++`) handles it fine, so on Linux specifically,
+`build.zig` builds `steam-bridge` and `tsw-gui` as `.o`/`.a` artifacts
+with `zig build-obj` and links the final binaries by shelling out to `cc`
+(`c++` for `tsw-gui`, since it links C++ object code from imgui and needs
+libstdc++ pulled in) instead of `b.addExecutable`'s normal path. Windows
+and macOS don't have this bug (it's specific to this glibc/gcc
+combination), so they use Zig's own linker normally via `addExecutable` —
+see `needsExternalLinker` in `build.zig`. `tsw-cli` doesn't need libc on
+any platform, so it's unaffected everywhere. Revisit the Linux branches
+once Zig's linker supports SFrame relocations upstream.
 
 ## Workflow
 
