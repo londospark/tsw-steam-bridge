@@ -1,0 +1,4 @@
+.zig-cache/
+zig-out/
+vendor/sdk/
+steam_appid.txt

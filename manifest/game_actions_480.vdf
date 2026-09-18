@@ -1,0 +1,56 @@
+// Steam Input "In-Game Actions" manifest for the TSW bridge.
+//
+// This is registered against app id 480 (Valve's public "Spacewar" test
+// app) via steam_appid.txt, which is the standard way for a personal/
+// unpublished tool to use the Steam Input API — see README.md. If you ever
+// publish this under your own app id, regenerate this file for that id and
+// update steam_appid.txt to match.
+//
+// Action names here (the quoted keys under AnalogTrigger/Button) are the
+// stable vocabulary the bridge's logical control table
+// (src/bridge_main.zig) binds to. Per-locomotive profiles under profiles/
+// map each of these to that loco's real TSW node path.
+"In Game Actions"
+{
+    "actions"
+    {
+        "Driving"
+        {
+            "title" "#Set_Driving"
+
+            "AnalogTrigger"
+            {
+                "throttle" "#Action_Throttle"
+                "brake" "#Action_Brake"
+            }
+
+            "Button"
+            {
+                "aws_reset" "#Action_AwsReset"
+                "dsd_reset" "#Action_DsdReset"
+                "horn" "#Action_Horn"
+                "sander" "#Action_Sander"
+                "pantograph_up" "#Action_PantographUp"
+                "pantograph_down" "#Action_PantographDown"
+                "wipers_toggle" "#Action_WipersToggle"
+            }
+        }
+    }
+
+    "localization"
+    {
+        "english"
+        {
+            "set_driving" "Driving"
+            "action_throttle" "Throttle"
+            "action_brake" "Brake"
+            "action_awsreset" "AWS Reset"
+            "action_dsdreset" "DSD Reset"
+            "action_horn" "Horn"
+            "action_sander" "Sander"
+            "action_pantographup" "Pantograph Up"
+            "action_pantographdown" "Pantograph Down"
+            "action_wiperstoggle" "Wipers"
+        }
+    }
+}
