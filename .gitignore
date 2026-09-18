@@ -1,4 +1,10 @@
 .zig-cache/
 zig-out/
+zig-pkg/
 vendor/sdk/
 steam_appid.txt
+imgui.ini
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc

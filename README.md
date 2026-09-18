@@ -34,21 +34,30 @@ Two executables, because they have very different dependency footprints:
 - **`steam-bridge`** — the actual bridge. Links against the Steamworks SDK
   to read Steam Input actions and drives them into TSW via the same client
   code `tsw-cli` uses.
+- **`tsw-gui`** — a live dashboard shell (Dear ImGui, docked panels) for
+  watching the bridge. Not yet wired to `steam-bridge`'s live loop — see
+  "The GUI" below.
 
 ```
 src/
   main.zig          tsw-cli entry point
-  bridge_main.zig    steam-bridge entry point (the real-time poll loop)
+  bridge_main.zig   steam-bridge entry point (the real-time poll loop)
+  gui_main.zig      tsw-gui entry point (ImGui dashboard shell)
   tsw/
-    client.zig       TSW external API HTTP client
-    profile.zig       per-locomotive control-mapping profiles
+    client.zig      TSW external API HTTP client
+    profile.zig     per-locomotive control-mapping profiles
   steam/
-    ffi.zig           hand-written extern bindings for the Steamworks flat C API
-    input.zig         higher-level ISteamInput wrapper
+    ffi.zig         hand-written extern bindings for the Steamworks flat C API
+    input.zig       higher-level ISteamInput wrapper
 manifest/
   game_actions_480.vdf   Steam Input action manifest (our own, not TSW's)
 profiles/
   <ObjectClass>.json     per-locomotive control mappings, built up over time
+scripts/
+  run-gui.sh        launches tsw-gui with your current Omarchy font
+docs/
+  manual.tex        user manual source (see "Building the manual")
+  images/           screenshots used by the manual
 ```
 
 ## The TSW external API
@@ -113,14 +122,58 @@ public "Spacewar" test app, id `480` — `steam-bridge` writes
 ever publish this under your own Steam app id, swap it there and
 regenerate `manifest/game_actions_480.vdf` for that id.
 
-## Building
+## The GUI
 
-Requires Zig 0.16.0+ and the vendored Steamworks SDK (see below).
+`tsw-gui` is a docked ImGui dashboard shell, built on
+[zgui](https://github.com/zig-gamedev/zgui) +
+[zglfw](https://github.com/zig-gamedev/zglfw) +
+[zopengl](https://github.com/zig-gamedev/zopengl) (all `zig fetch`-ed, all
+declare `minimum_zig_version = "0.16.0"`). It currently shows a
+representative layout (Controller / Locomotive / TSW API panels) but isn't
+wired to a live `steam-bridge` poll loop yet — that's the natural next step
+once Steam Input manifest activation (above) is sorted out.
+
+Theming reads Omarchy's *current* theme colors live from
+`~/.local/state/omarchy/current/theme/colors.toml` at startup (not
+hardcoded, so it follows whatever theme is active), mapped onto ImGui's
+full `StyleCol` palette. The font isn't auto-detected inside the binary —
+pass `--font-file` yourself, or just use `scripts/run-gui.sh`, which
+resolves your current Omarchy font (`omarchy font current` -> `fc-match`)
+and launches with it:
 
 ```sh
-zig build            # builds tsw-cli always; steam-bridge if the SDK is vendored
+./scripts/run-gui.sh
+```
+
+### A real bug worth knowing about if you touch this code
+
+zgui's OpenGL3 backend is compiled with `IMGUI_IMPL_OPENGL_LOADER_CUSTOM`,
+which means **you must call `zopengl.loadCoreProfile(...)` before
+`zgui.backend.init()`** — otherwise the very first GL call inside ImGui's
+init jumps through an uninitialized pointer and segfaults.
+
+Less obviously: once you've loaded zopengl, **never declare your own
+`extern fn glViewport`/`glClearColor`/etc.** zopengl `@export`s its *own*
+global symbols with those exact names (function-pointer variables it fills
+in via `zglfw.getProcAddress`), specifically so C/C++ code expecting to
+link against real GL functions gets zopengl's loaded pointers instead. A
+second same-named `extern fn` in Zig code doesn't error at link time — the
+linker just binds your call to the address of zopengl's pointer *variable*
+instead of the function it points to, and it segfaults on first use with a
+useless, unwindable-looking backtrace. Call through `zopengl.bindings`
+(`const gl = zopengl.bindings; gl.viewport(...)`) instead. This cost a lot
+of debugging time; see git history around `gui_main.zig` if it resurfaces.
+
+## Building
+
+Requires Zig 0.16.0+ and the vendored Steamworks SDK (see below). The GUI's
+dependencies (zgui/zglfw/zopengl) are fetched automatically by `zig build`.
+
+```sh
+zig build            # builds tsw-cli and tsw-gui always; steam-bridge if the SDK is vendored
 zig build run-cli -- info --key-file /path/to/CommAPIKey.txt
 zig build run-bridge -- --key-file /path/to/CommAPIKey.txt
+zig build run-gui                    # or: ./scripts/run-gui.sh
 ```
 
 ### Vendoring the Steamworks SDK
@@ -137,11 +190,13 @@ Zig 0.16.0's self-hosted ELF linker can't yet handle the `.sframe` unwind
 sections that current glibc/gcc emit into `crt1.o` (reproduced independent
 of this project — any libc-linked Zig binary fails with `fatal linker
 error: unhandled relocation type R_X86_64_PC64 ... .sframe` here). The
-system linker (via `cc`) handles it fine, so `build.zig` builds
-`steam-bridge` as a `.o` with `zig build-obj` and links the final binary by
-shelling out to `cc` instead of `b.addExecutable`'s normal path. `tsw-cli`
-doesn't need libc at all, so it's unaffected and links normally. Revisit
-the `have_sdk` branch in `build.zig` once Zig's linker supports SFrame
+system linker (via `cc`/`c++`) handles it fine, so `build.zig` builds
+`steam-bridge` and `tsw-gui` as `.o`/`.a` artifacts with `zig build-obj`
+and links the final binaries by shelling out to `cc` (`c++` for `tsw-gui`,
+since it links C++ object code from imgui and needs libstdc++ pulled in)
+instead of `b.addExecutable`'s normal path. `tsw-cli` doesn't need libc at
+all, so it's unaffected and links normally. Revisit the `have_sdk` branch
+and the `tsw-gui` block in `build.zig` once Zig's linker supports SFrame
 relocations upstream.
 
 ## Workflow
@@ -166,3 +221,12 @@ relocations upstream.
   override for this yet — add one in the profile format if you hit it.
 - No escaping on `/set` values beyond what we generate ourselves (bools and
   floats); fine for now since that's all TSW controls take.
+- `tsw-gui` shows a representative layout, not live data — it doesn't yet
+  poll a running `steam-bridge` or read `profiles/`. (Docking layout
+  itself *is* persisted between runs — ImGui does that automatically via
+  `imgui.ini` in the working directory, which is gitignored.)
+- `throttle`/`brake`/`combined_power_brake` support both a plain analog
+  axis and notched/notchless up-down stepping (see
+  `profiles/README.md`); step size is tunable per-profile or globally via
+  `steam-bridge --step-size`. We haven't found a TSW API field that
+  reports a lever's real notch count, so that's set by hand from testing.

@@ -6,10 +6,18 @@
 // publish this under your own app id, regenerate this file for that id and
 // update steam_appid.txt to match.
 //
-// Action names here (the quoted keys under AnalogTrigger/Button) are the
-// stable vocabulary the bridge's logical control table
+// Action names here (the quoted keys under StickPadGyro/AnalogTrigger/
+// Button) are the stable vocabulary the bridge's logical control table
 // (src/bridge_main.zig) binds to. Per-locomotive profiles under profiles/
-// map each of these to that loco's real TSW node path.
+// map whichever of these apply to that loco's real TSW node path — not
+// every loco needs every action (a British loco's profile won't map any
+// pzb_*/sifa_*/lzb_* names, a German loco's won't map tpws_*/dra_*, etc).
+//
+// Deliberately one flat action set: which physical buttons/axes drive
+// which of these actions is entirely up to you via Steam's own controller
+// configurator (Big Picture -> Controller Settings), including chords/
+// layers if you want more actions than you have buttons. This file only
+// declares what's available to bind; it doesn't decide how.
 "In Game Actions"
 {
     "actions"
@@ -17,6 +25,20 @@
         "Driving"
         {
             "title" "#Set_Driving"
+
+            // Two ways to drive power/brake, bind whichever matches your
+            // hardware: a single combined lever (forward = power, back =
+            // brake, one physical axis) via combined_power_brake, or a
+            // traditional pair of separate handles via throttle/brake.
+            // Nothing stops you binding both at once if you want.
+            "StickPadGyro"
+            {
+                "combined_power_brake"
+                {
+                    "title" "#Action_CombinedPowerBrake"
+                    "input_mode" "joystick_move"
+                }
+            }
 
             "AnalogTrigger"
             {
@@ -26,13 +48,54 @@
 
             "Button"
             {
-                "aws_reset" "#Action_AwsReset"
-                "dsd_reset" "#Action_DsdReset"
+                // --- Notch-stepping for the three levers above ---
+                // Bind these to a trackpad in "Scroll Wheel" (circular)
+                // mode for a haptic, rotary-encoder feel, or to any other
+                // pair of buttons/paddles. Each is a momentary press per
+                // detent; the bridge accumulates them into an absolute
+                // position (see LeverMode in src/tsw/profile.zig) instead
+                // of sending the detent itself. A given loco's profile
+                // picks either this or the plain analog axis above for
+                // each lever, not both.
+                "throttle_up" "#Action_ThrottleUp"
+                "throttle_down" "#Action_ThrottleDown"
+                "brake_up" "#Action_BrakeUp"
+                "brake_down" "#Action_BrakeDown"
+                "combined_power_brake_up" "#Action_CombinedPowerBrakeUp"
+                "combined_power_brake_down" "#Action_CombinedPowerBrakeDown"
+
+                // --- Core cab controls ---
                 "horn" "#Action_Horn"
                 "sander" "#Action_Sander"
                 "pantograph_up" "#Action_PantographUp"
                 "pantograph_down" "#Action_PantographDown"
                 "wipers_toggle" "#Action_WipersToggle"
+                "headlights_toggle" "#Action_HeadlightsToggle"
+                "cab_light_toggle" "#Action_CabLightToggle"
+                "doors_left_toggle" "#Action_DoorsLeftToggle"
+                "doors_right_toggle" "#Action_DoorsRightToggle"
+                "coupler_toggle" "#Action_CouplerToggle"
+
+                // --- British safety systems ---
+                "aws_reset" "#Action_AwsReset"
+                "dsd_reset" "#Action_DsdReset"
+                "tpws_override" "#Action_TpwsOverride"
+                "tpws_isolate" "#Action_TpwsIsolate"
+                "dra_toggle" "#Action_DraToggle"
+
+                // --- German safety systems (PZB/SIFA/LZB) ---
+                "sifa_reset" "#Action_SifaReset"
+                "pzb_acknowledge" "#Action_PzbAcknowledge"
+                "pzb_release" "#Action_PzbRelease"
+                "pzb_restriction_override" "#Action_PzbRestrictionOverride"
+                "lzb_override" "#Action_LzbOverride"
+                "lzb_isolation" "#Action_LzbIsolation"
+
+                // --- ETCS DMI soft-buttons ---
+                "etcs_start" "#Action_EtcsStart"
+                "etcs_acknowledge" "#Action_EtcsAcknowledge"
+                "etcs_override" "#Action_EtcsOverride"
+                "etcs_non_leading" "#Action_EtcsNonLeading"
             }
         }
     }
@@ -42,15 +105,45 @@
         "english"
         {
             "set_driving" "Driving"
+
+            "action_combinedpowerbrake" "Combined Power/Brake"
             "action_throttle" "Throttle"
             "action_brake" "Brake"
-            "action_awsreset" "AWS Reset"
-            "action_dsdreset" "DSD Reset"
+            "action_throttleup" "Throttle Up (notch/step)"
+            "action_throttledown" "Throttle Down (notch/step)"
+            "action_brakeup" "Brake Up (notch/step)"
+            "action_brakedown" "Brake Down (notch/step)"
+            "action_combinedpowerbrakeup" "Combined Power/Brake Up (notch/step)"
+            "action_combinedpowerbrakedown" "Combined Power/Brake Down (notch/step)"
+
             "action_horn" "Horn"
             "action_sander" "Sander"
             "action_pantographup" "Pantograph Up"
             "action_pantographdown" "Pantograph Down"
             "action_wiperstoggle" "Wipers"
+            "action_headlightstoggle" "Headlights"
+            "action_cablighttoggle" "Cab Light"
+            "action_doorslefttoggle" "Doors Left"
+            "action_doorsrighttoggle" "Doors Right"
+            "action_couplertoggle" "Coupler"
+
+            "action_awsreset" "AWS Reset"
+            "action_dsdreset" "DSD Reset"
+            "action_tpwsoverride" "TPWS Override"
+            "action_tpwsisolate" "TPWS Isolate"
+            "action_dratoggle" "DRA"
+
+            "action_sifareset" "SIFA Reset"
+            "action_pzbacknowledge" "PZB Acknowledge (Wachsam)"
+            "action_pzbrelease" "PZB Release (Frei)"
+            "action_pzbrestrictionoverride" "PZB Restriction Override"
+            "action_lzboverride" "LZB Override"
+            "action_lzbisolation" "LZB Isolation"
+
+            "action_etcsstart" "ETCS Start"
+            "action_etcsacknowledge" "ETCS Acknowledge"
+            "action_etcsoverride" "ETCS Override"
+            "action_etcsnonleading" "ETCS Non-Leading"
         }
     }
 }

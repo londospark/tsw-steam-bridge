@@ -1,0 +1,433 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{parskip}
+\usepackage{tabularx}
+\usepackage{booktabs}
+
+\definecolor{accent}{HTML}{0B78B8}    % darkened Omarchy accent, printable on white
+\definecolor{codebg}{HTML}{F4F6FA}
+\definecolor{coderule}{HTML}{C7D3E8}
+\definecolor{mutedtext}{HTML}{5A6B85}
+
+\titleformat{\section}{\Large\bfseries\color{accent}}{\thesection}{0.5em}{}
+\titleformat{\subsection}{\large\bfseries\color{accent}}{\thesubsection}{0.5em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\textcolor{mutedtext}{tsw-steam-bridge}}
+\fancyhead[R]{\small\textcolor{mutedtext}{User Manual}}
+\fancyfoot[C]{\small\thepage}
+
+\lstdefinestyle{shell}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    frame=single,
+    rulecolor=\color{coderule},
+    framerule=0.6pt,
+    xleftmargin=0.5em,
+    xrightmargin=0.5em,
+    breaklines=true,
+    columns=fullflexible,
+}
+\lstset{style=shell}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=accent,
+    urlcolor=accent,
+    citecolor=accent,
+    pdftitle={tsw-steam-bridge User Manual},
+    pdfauthor={tsw-steam-bridge},
+}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textcolor{accent}{\Huge tsw-steam-bridge}\\[0.3em]\Large User Manual}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{1cm}
+\noindent
+A Zig bridge between Steam Input and Train Sim World: it reads real Steam
+Input digital/analog actions and drives Train Sim World's cab controls
+directly through its external HTTP API, instead of going through Steam
+Input's keyboard/mouse emulation.
+
+\vspace{0.5cm}
+\noindent
+\textbf{Why this exists:} keyboard emulation flattens two things Train Sim
+World needs kept apart. Throttle and brake want continuous values, not
+just ``tapped'' or ``held''. And safety controls like AWS (Automatic
+Warning System) reset and DSD (Driver's Safety Device / vigilance) reset
+are separate physical controls in the real cab that often end up sharing
+or fighting over the same key in a simple keybind scheme. This bridge
+keeps them independent by talking to Steam Input's real action API and to
+Train Sim World's real control API, with nothing synthetic in between.
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Overview}
+
+The project has three executables, built from the same source tree:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Executable} & \textbf{Purpose} \\
+\midrule
+\code{tsw-cli} & Pure Zig, no external dependencies. Talks to Train Sim
+World's \code{-HTTPAPI} over plain HTTP. Use it to check the API is
+reachable, explore a locomotive's control tree, and hand-test individual
+values. \\[0.5em]
+\code{steam-bridge} & The actual bridge process. Links against the
+Steamworks SDK to read real Steam Input actions and writes their values
+into Train Sim World via the same client code \code{tsw-cli} uses. \\[0.5em]
+\code{tsw-gui} & A live dashboard shell built on Dear ImGui, themed from
+your Omarchy colors and font, with dockable panels. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Control names are \textbf{not consistent across locomotives} --- not even
+across versions of the same class --- so there is no single, universal
+``AWS reset'' path in Train Sim World's API. Instead, each locomotive gets
+its own small JSON \emph{profile} under \path{profiles/}, mapping a stable
+set of logical control names (\code{throttle}, \code{aws\_reset},
+\code{dsd\_reset}, \ldots) onto that particular locomotive's real node
+paths. You build these up over time, one locomotive at a time, using
+\code{tsw-cli discover}.
+
+\section{Prerequisites}
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Zig 0.16.0 or newer.}
+    \item \textbf{Train Sim World}, launched with the \code{-HTTPAPI}
+    Steam launch option (see Section~\ref{sec:tsw-api}).
+    \item \textbf{The Steamworks SDK}, vendored locally (see
+    Section~\ref{sec:sdk}) --- needed to build \code{steam-bridge}.
+    \item \textbf{A Steam client}, running and logged in, for
+    \code{steam-bridge} and any Steam Input functionality.
+\end{itemize}
+
+\code{tsw-cli} needs none of the above except Zig itself, so it is the
+easiest place to start.
+
+\section{Enabling Train Sim World's external API}
+\label{sec:tsw-api}
+
+Train Sim World ships an external control API that is not officially
+documented by Dovetail Games, but is well understood from community
+reverse-engineering. To enable it:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item In Steam, open Train Sim World's properties and add
+    \code{-HTTPAPI} to the launch options.
+    \item Launch the game once. This writes a file called
+    \code{CommAPIKey.txt} under\\
+    \path{Documents/My Games/TrainSimWorld<N>/Saved/Config/} (where
+    \code{<N>} is the game's version number).
+    \item If you're running Train Sim World through Proton, that path is
+    inside the Proton prefix, typically under something like\\
+    \path{~/.local/share/Steam/steamapps/compatdata/<appid>/pfx/} \\
+    \path{drive_c/users/steamuser/My Documents/My Games/...}. \\
+    The quickest way to find it is:
+\begin{lstlisting}
+find ~/.steam ~/.local/share/Steam -iname CommAPIKey.txt
+\end{lstlisting}
+\end{enumerate}
+
+Every request to the API must include the contents of that file in a
+\code{DTGCommKey} HTTP header --- the tools in this project handle that for
+you once you point them at the file with \code{--key-file}.
+
+The API was observed listening on \code{http://localhost:31270} on Train
+Sim World 5. This is not officially documented and may differ on later
+versions; run \code{tsw-cli info} to confirm (Section~\ref{sec:cli-info}).
+
+\section{Vendoring the Steamworks SDK}
+\label{sec:sdk}
+
+\code{steam-bridge} needs Valve's Steamworks SDK, which is not
+redistributable and must be downloaded yourself:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item Sign in with any Steam account at
+    \url{https://partner.steamgames.com/downloads/list} and download
+    \code{steamworks\_sdk.zip}.
+    \item Extract it into the project so that
+    \path{vendor/sdk/public/...} and
+    \path{vendor/sdk/redistributable_bin/...} exist.
+\end{enumerate}
+
+\code{vendor/sdk/} is git-ignored --- it is a large, license-encumbered
+redistributable, not part of the project's source. \code{zig build} will
+still build \code{tsw-cli} and \code{tsw-gui} without it; it only skips
+\code{steam-bridge}.
+
+\subsection*{Why app id 480}
+
+Steam Input's API needs to run as some recognized Steam application ---
+\code{SteamAPI\_Init} needs a \code{steam\_appid.txt} file (or a
+\code{SteamAppId} environment variable) naming one. For a personal,
+unpublished tool like this, the standard approach used across the
+community is Valve's public ``Spacewar'' test application, id \code{480}.
+\code{steam-bridge} writes \code{steam\_appid.txt} containing \code{480}
+automatically on first run if it is missing. If you ever publish this
+project under your own Steam app id, replace that file's contents and
+regenerate \path{manifest/game_actions_480.vdf} for your id.
+
+\section{Building}
+
+From the project root:
+
+\begin{lstlisting}
+zig build
+\end{lstlisting}
+
+This builds \code{tsw-cli} and \code{tsw-gui} unconditionally, and
+\code{steam-bridge} if the Steamworks SDK has been vendored (Section
+\ref{sec:sdk}). The GUI's own dependencies (zgui, zglfw, zopengl) are
+fetched automatically the first time you build.
+
+Binaries land in \path{zig-out/bin/}. You can also run them directly
+through the build system, which forwards arguments after \code{--}:
+
+\begin{lstlisting}
+zig build run-cli    -- info --key-file /path/to/CommAPIKey.txt
+zig build run-bridge -- --key-file /path/to/CommAPIKey.txt
+zig build run-gui
+\end{lstlisting}
+
+\subsection*{A note if you're building this yourself on a similar system}
+
+On some current Linux systems, Zig 0.16.0's own linker cannot yet handle
+the \code{.sframe} unwind sections that current glibc/gcc toolchains emit
+--- any libc-linked Zig binary fails to link with an error mentioning
+\code{unhandled relocation type R\_X86\_64\_PC64 ... .sframe}. If you hit
+this, it is a toolchain issue, not a problem with your setup specifically;
+this project's own \path{build.zig} already works around it for
+\code{steam-bridge} and \code{tsw-gui} by linking those two through the
+system \code{cc}/\code{c++} instead of Zig's built-in linker.
+
+\section{tsw-cli --- exploring and testing the API}
+\label{sec:cli-info}
+
+\code{tsw-cli} is the tool you reach for first: it talks to Train Sim
+World directly over HTTP and does nothing with Steam Input at all.
+
+\subsection{Checking the API is reachable}
+
+\begin{lstlisting}
+tsw-cli --key-file /path/to/CommAPIKey.txt info
+\end{lstlisting}
+
+A successful response confirms the port and prints the game's name and
+build number, which is the fastest way to sanity-check that
+\code{-HTTPAPI} took effect and that the port hasn't moved on your version
+of the game.
+
+\subsection{Listing controls}
+
+\begin{lstlisting}
+tsw-cli --key-file <key> list CurrentDrivableActor
+\end{lstlisting}
+
+Lists the child nodes and endpoints of whatever locomotive you are
+currently driving --- this is how you discover what is actually
+controllable on a given loco, since names vary by locomotive class.
+
+\subsection{Reading and writing values}
+
+\begin{lstlisting}
+tsw-cli --key-file <key> get CurrentDrivableActor/Throttle_F.Value
+tsw-cli --key-file <key> set CurrentDrivableActor/Pantograph_F.Value true
+\end{lstlisting}
+
+Use \code{set} carefully and only while stationary until you know what a
+control actually does --- some are simple booleans, others expect a float
+in a particular range.
+
+\subsection{Building a locomotive profile}
+\label{sec:discover}
+
+\begin{lstlisting}
+tsw-cli --key-file <key> discover
+\end{lstlisting}
+
+Walks the current locomotive's writable controls and writes a skeleton
+profile to \path{profiles/<ObjectClass>.json}, where \code{<ObjectClass>}
+is that locomotive's internal class name. The skeleton lists every
+candidate writable control under its raw node name; you then:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item Test each candidate path with \code{tsw-cli set} while parked,
+    and observe what happens in the cab.
+    \item Rename the JSON key to the matching logical name the bridge
+    expects. The full, current list --- covering core cab controls plus
+    British (AWS/DSD/TPWS/DRA), German (SIFA/PZB/LZB) and ETCS actions
+    --- is kept in \path{profiles/README.md} rather than duplicated here,
+    since it grows as the bridge's control vocabulary does.
+    \item Fix \code{"kind"} to \code{"float"} for anything that isn't a
+    plain true/false.
+    \item Delete entries you don't care about mapping --- an incomplete
+    profile is fine; the bridge simply skips logical controls that
+    aren't mapped for the current locomotive.
+\end{enumerate}
+
+\section{steam-bridge --- running the live bridge}
+
+Once you have a locomotive profile and the Steamworks SDK vendored:
+
+\begin{lstlisting}
+zig build run-bridge -- --key-file /path/to/CommAPIKey.txt
+\end{lstlisting}
+
+On startup, \code{steam-bridge} initializes the Steamworks API, activates
+its own \code{Driving} Steam Input action set (defined in
+\path{manifest/game_actions_480.vdf}, entirely separate from Train Sim
+World's own Steam Input configuration), and begins polling. Every tick it:
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item Reads the current locomotive's class from Train Sim World and
+    loads the matching profile from \path{profiles/}.
+    \item Polls each logical Steam Input action --- \code{throttle},
+    \code{brake} and \code{combined\_power\_brake} as analog axes or
+    stepped detents depending on the active profile's setting for that
+    lever, the rest as digital buttons.
+    \item For anything that changed and has a mapping in the active
+    profile, sends the new value to Train Sim World via \code{PATCH
+    /set/...}.
+\end{enumerate}
+
+\subsection*{Notched vs.\ notchless levers}
+
+Real locomotives have both kinds of throttle/brake handle, and holding an
+auto-centering analog stick at one precise deflection to maintain line
+speed for an hour is uncomfortable at best. So each of \code{throttle},
+\code{brake} and \code{combined\_power\_brake} can instead be driven by a
+pair of up/down detent actions (\code{throttle\_up}/\code{throttle\_down},
+etc.) that \code{steam-bridge} accumulates into an absolute position
+itself --- snapped to a fixed number of notches, or stepped by a tunable
+amount for a notchless lever. This is controlled per-lever by that
+control's \code{"mode"} field in its locomotive profile
+(\code{"absolute"}, \code{"notched"} with a \code{"notches"} count, or
+\code{"notchless"} with a \code{"step\_size"}); see
+\path{profiles/README.md} for the full field reference. The default step
+size for notchless levers can be overridden globally with
+\code{steam-bridge --step-size <value>}.
+
+A detent-based binding pairs naturally with Steam Input's trackpad
+``Scroll Wheel'' mode set to circular swipe, which turns a flat trackpad
+into a haptic rotary encoder --- but any pair of buttons or paddles works
+just as well.
+
+\textbf{Current status:} Steam's own API confirms successful
+initialization against a real, running Steam client, but activating the
+custom action manifest is not yet reliably working end-to-end --- this is
+the active area of development. See the project README's ``Known gaps''
+section for the latest status.
+
+\section{tsw-gui --- the live dashboard}
+
+\code{tsw-gui} is a windowed dashboard with dockable panels, built on Dear
+ImGui. Launch it with:
+
+\begin{lstlisting}
+./scripts/run-gui.sh
+\end{lstlisting}
+
+This wrapper resolves whatever monospace font Omarchy currently has set
+(\code{omarchy font current}, resolved to a real font file via
+\code{fc-match}) and passes it through, so the dashboard's font always
+matches your system font without the program itself needing to know
+anything about Omarchy or fontconfig. Colors are read directly from your
+active Omarchy theme's \path{colors.toml} at startup, so the panel follows
+whichever theme is active system-wide --- nothing is hardcoded.
+
+Figure~\ref{fig:screenshot} shows the dashboard's ``Controller'' panel,
+themed from the Coaster theme's palette and set in the SlabMono Nerd Font
+variant that was active on this machine at the time.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{images/tsw-gui-screenshot.png}
+    \caption{The tsw-gui Controller panel, docked and themed from the
+    active Omarchy theme.}
+    \label{fig:screenshot}
+\end{figure}
+
+Panels can be dragged by their title bar to rearrange or dock them
+together. Dear ImGui saves this layout automatically to an \path{imgui.ini}
+file in the working directory and restores it the next time you launch
+\code{tsw-gui}.
+
+\textbf{Current status:} this is a windowing/theming/layout scaffold. The
+panels shown are representative of the intended layout but are not yet
+wired to a running \code{steam-bridge}'s live data --- that is the natural
+next step once Steam Input manifest activation is working end to end.
+
+\section{Troubleshooting}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Symptom} & \textbf{Likely cause / fix} \\
+\midrule
+\code{tsw-cli info} fails to connect &
+Check \code{-HTTPAPI} is actually in Train Sim World's launch options and
+the game has been launched at least once since adding it. Confirm the key
+file path. Try the base URL override if your game version uses a
+different port. \\[0.6em]
+Steam Input fails with \code{NoSteamClient} &
+Steam isn't running, or isn't fully started yet. Make sure Steam is open
+and you are logged in before starting \code{steam-bridge}. \\[0.6em]
+\code{zig build} skips \code{steam-bridge} &
+The Steamworks SDK hasn't been vendored under \path{vendor/sdk/} --- see
+Section~\ref{sec:sdk}. \\[0.6em]
+A control does nothing when set &
+Not every node listed by \code{discover} is meaningful --- some are
+read-only telemetry mirrors or apply only to specific train sub-systems.
+Cross-check against what changes in the cab. \\[0.6em]
+\code{tsw-gui} shows the built-in font instead of my font &
+Launch it via \path{scripts/run-gui.sh}, or pass \code{--font-file}
+yourself with a real \code{.ttf}/\code{.otf} path. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Reference: profile file format}
+
+Profiles live at \path{profiles/<ObjectClass>.json}:
+
+\begin{lstlisting}
+{
+  "objectClass": "RVM_CRG_DB_BR101_C",
+  "displayName": "DB BR 101",
+  "controls": {
+    "throttle":  { "path": "CurrentDrivableActor/Throttle_F.Value", "kind": "float" },
+    "aws_reset": { "path": "CurrentDrivableActor/AWS_F.Value",      "kind": "bool"  }
+  }
+}
+\end{lstlisting}
+
+\code{kind} is either \code{"bool"} or \code{"float"} and controls how the
+bridge formats the value it sends to \code{PATCH /set/...}. A logical
+control with no entry is simply never sent for that locomotive.
+
+\end{document}

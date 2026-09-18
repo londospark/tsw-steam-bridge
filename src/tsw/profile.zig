@@ -15,11 +15,31 @@
 //!   "objectClass": "RVM_CRG_DB_BR101_C",
 //!   "displayName": "DB BR 101",
 //!   "controls": {
-//!     "throttle":  { "path": "CurrentDrivableActor/Throttle_F.Value", "kind": "float" },
-//!     "aws_reset": { "path": "CurrentDrivableActor/AWS_F.Value",      "kind": "bool" }
+//!     "throttle":  {
+//!       "path": "CurrentDrivableActor/Throttle_F.Value",
+//!       "kind": "float",
+//!       "mode": "notched",
+//!       "notches": 5
+//!     },
+//!     "brake": {
+//!       "path": "CurrentDrivableActor/TrainBrake_F.Value",
+//!       "kind": "float",
+//!       "mode": "notchless",
+//!       "step_size": 0.03
+//!     },
+//!     "aws_reset": { "path": "CurrentDrivableActor/AWS_F.Value", "kind": "bool" }
 //!   }
 //! }
 //! ```
+//!
+//! `mode`/`notches`/`step_size` only matter for the three lever controls
+//! (throttle, brake, combined_power_brake — see src/bridge_main.zig):
+//! `"mode"` is `"absolute"` (default, read a plain analog axis directly),
+//! `"notched"` (read up/down detents, step exactly `1/notches` of the
+//! control's range per detent, snapped to the notch grid), or
+//! `"notchless"` (read up/down detents, step by `step_size` per detent —
+//! real locos have both kinds of lever, and TSW's API doesn't reliably
+//! expose which, so this is set by hand from testing in the cab).
 
 const std = @import("std");
 const Io = std.Io;
@@ -74,6 +94,44 @@ pub const Profile = struct {
     pub fn controlKind(self: Profile, name: []const u8) ?[]const u8 {
         const entry = self.controlEntry(name) orelse return null;
         return asString(entry.get("kind") orelse return null);
+    }
+
+    pub const LeverMode = enum { absolute, notched, notchless };
+
+    /// How a lever control (throttle/brake/combined_power_brake) should be
+    /// driven. Defaults to `.absolute` (read the plain analog axis) when
+    /// unset or unrecognized.
+    pub fn controlMode(self: Profile, name: []const u8) LeverMode {
+        const entry = self.controlEntry(name) orelse return .absolute;
+        const s = asString(entry.get("mode") orelse return .absolute) orelse return .absolute;
+        if (std.mem.eql(u8, s, "notched")) return .notched;
+        if (std.mem.eql(u8, s, "notchless")) return .notchless;
+        return .absolute;
+    }
+
+    fn asNumber(v: std.json.Value) ?f64 {
+        return switch (v) {
+            .float => |f| f,
+            .integer => |i| @floatFromInt(i),
+            else => null,
+        };
+    }
+
+    /// Notch count for `mode: "notched"` levers, if set.
+    pub fn controlNotches(self: Profile, name: []const u8) ?u32 {
+        const entry = self.controlEntry(name) orelse return null;
+        const n = asNumber(entry.get("notches") orelse return null) orelse return null;
+        if (n < 1) return null;
+        return @intFromFloat(n);
+    }
+
+    /// Per-detent step size for `mode: "notchless"` levers, in the
+    /// control's own units (e.g. 0.03 for 3% of a 0..1 range). Falls back
+    /// to the bridge's `--step-size` default when unset.
+    pub fn controlStepSize(self: Profile, name: []const u8) ?f32 {
+        const entry = self.controlEntry(name) orelse return null;
+        const n = asNumber(entry.get("step_size") orelse return null) orelse return null;
+        return @floatCast(n);
     }
 };
 

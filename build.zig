@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
         link_cmd.addFileArg(bridge_obj.getEmittedBin());
         link_cmd.addArg("-o");
         const out_bin = link_cmd.addOutputFileArg("steam-bridge");
-        link_cmd.addArgs(&.{ "-L", sdk_lib_dir_abs, "-lsteam_api", rpath_arg });
+        link_cmd.addArgs(&.{ "-L", sdk_lib_dir_abs, "-lsteam_api", "-lm", rpath_arg });
 
         const install_bridge = b.addInstallBinFile(out_bin, "steam-bridge");
         b.getInstallStep().dependOn(&install_bridge.step);
@@ -79,6 +79,66 @@ pub fn build(b: *std.Build) void {
             "steam-bridge skipped: " ++ sdk_lib_dir ++ " not found (vendor the Steamworks SDK to build it)",
         });
         b.getInstallStep().dependOn(&warn.step);
+    }
+
+    // --- tsw-gui: live dashboard (Dear ImGui via zgui/zglfw + OpenGL3). ---
+    // Same libc-link situation as steam-bridge (see note above), plus this
+    // one has C++ object code (imgui itself), so the final link is done
+    // with `c++` rather than `cc` to get libstdc++ pulled in correctly.
+    {
+        // ReleaseFast (independent of our own module's optimize level) so
+        // Zig doesn't instrument these vendored C/C++ sources with UBSan
+        // checks — their runtime handlers (__ubsan_handle_*) only get
+        // auto-linked by Zig's own linker, which we bypass below for the
+        // same .sframe reason as steam-bridge.
+        const zgui_dep = b.dependency("zgui", .{
+            .target = target,
+            .optimize = .ReleaseFast,
+            .backend = .glfw_opengl3,
+        });
+        const zglfw_dep = b.dependency("zglfw", .{
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        const zopengl_dep = b.dependency("zopengl", .{
+            .target = target,
+        });
+
+        const gui_obj = b.addObject(.{
+            .name = "tsw-gui",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/gui_main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+                .imports = &.{
+                    .{ .name = "zgui", .module = zgui_dep.module("root") },
+                    .{ .name = "zglfw", .module = zglfw_dep.module("root") },
+                    .{ .name = "zopengl", .module = zopengl_dep.module("root") },
+                },
+            }),
+        });
+
+        const zgui_lib = zgui_dep.artifact("imgui");
+        const zglfw_lib = zglfw_dep.artifact("glfw");
+
+        const gui_link_cmd = b.addSystemCommand(&.{"c++"});
+        gui_link_cmd.addFileArg(gui_obj.getEmittedBin());
+        gui_link_cmd.addFileArg(zgui_lib.getEmittedBin());
+        gui_link_cmd.addFileArg(zglfw_lib.getEmittedBin());
+        gui_link_cmd.addArg("-o");
+        const gui_out_bin = gui_link_cmd.addOutputFileArg("tsw-gui");
+        gui_link_cmd.addArgs(&.{ "-lGL", "-lX11", "-lm" });
+
+        const install_gui = b.addInstallBinFile(gui_out_bin, "tsw-gui");
+        b.getInstallStep().dependOn(&install_gui.step);
+
+        const run_gui = b.step("run-gui", "Run tsw-gui");
+        const run_gui_exec = std.Build.Step.Run.create(b, "run tsw-gui");
+        run_gui_exec.addFileArg(gui_out_bin);
+        run_gui_exec.step.dependOn(&install_gui.step);
+        if (b.args) |args| run_gui_exec.addArgs(args);
+        run_gui.dependOn(&run_gui_exec.step);
     }
 
     // --- tests ---

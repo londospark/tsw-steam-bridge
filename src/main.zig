@@ -157,6 +157,15 @@ fn jsonString(v: std.json.Value) ?[]const u8 {
     return v.string;
 }
 
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or haystack.len < needle.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) return true;
+    }
+    return false;
+}
+
 /// Walks CurrentDrivableActor's node tree one level deep, collecting any
 /// node that exposes a writable "Value" endpoint, and writes a profile
 /// skeleton for the loco currently in the cab.
@@ -205,6 +214,15 @@ fn cmdDiscover(arena: std.mem.Allocator, io: std.Io, client: *tsw.Client, out_pa
         for (endpoints_v.array.items) |ep_v| {
             const ep_obj = jsonObject(ep_v) orelse continue;
             const ep_name = jsonString(ep_obj.get("Name") orelse continue) orelse continue;
+
+            // Best-effort: TSW's API doesn't document a notch-count field
+            // anywhere we've found, but if some loco happens to expose one
+            // under a name like this, it's worth knowing about when you're
+            // filling in a lever's "notches" in its profile.
+            if (containsIgnoreCase(ep_name, "notch") or containsIgnoreCase(ep_name, "detent")) {
+                std.debug.print("  possible notch-count endpoint: CurrentDrivableActor/{s}.{s} (untested — try `tsw-cli get` on it)\n", .{ node_name, ep_name });
+            }
+
             if (!std.mem.eql(u8, ep_name, "Value")) continue;
             const writable = ep_obj.get("Writable") orelse continue;
             if (writable != .bool or !writable.bool) continue;
