@@ -178,11 +178,19 @@ zig build run-gui                    # or: ./scripts/run-gui.sh
 
 ### Vendoring the Steamworks SDK
 
-Download `steamworks_sdk.zip` from
+If you're the project owner setting up another machine you control, with
+SSH access to the private companion repo:
+
+```sh
+./scripts/fetch-sdk.sh
+```
+
+Otherwise: download `steamworks_sdk.zip` from
 <https://partner.steamgames.com/downloads/list> (any Steam account can get
 it) and extract it so `vendor/sdk/public/...` and
-`vendor/sdk/redistributable_bin/...` exist. `vendor/sdk/` is gitignored —
-it's a large, license-encumbered redistributable, not project source.
+`vendor/sdk/redistributable_bin/...` exist. `vendor/sdk/` is gitignored in
+this (public) repo — it's a large, license-encumbered redistributable,
+not project source, so it isn't published here.
 
 ### A note on this machine's linker
 

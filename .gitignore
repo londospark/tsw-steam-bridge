@@ -2,7 +2,6 @@
 zig-out/
 zig-pkg/
 vendor/sdk/
-steam_appid.txt
 imgui.ini
 docs/*.aux
 docs/*.log
