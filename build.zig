@@ -35,16 +35,20 @@ pub fn build(b: *std.Build) void {
         break :blk true;
     } else false;
 
+    // tsw-gui links in src/bridge.zig -> src/steam/input.zig too (it runs
+    // the same live bridge as steam-bridge, just driven once per rendered
+    // frame instead of a sleep loop), so it needs the SDK exactly as much
+    // as steam-bridge does.
     if (steam == null) {
         const warn = b.addSystemCommand(&.{
             "echo",
-            b.fmt("steam-bridge skipped: no known Steamworks redistributable layout for target OS '{t}'", .{os_tag}),
+            b.fmt("steam-bridge/tsw-gui skipped: no known Steamworks redistributable layout for target OS '{t}'", .{os_tag}),
         });
         b.getInstallStep().dependOn(&warn.step);
     } else if (!have_sdk) {
         const warn = b.addSystemCommand(&.{
             "echo",
-            b.fmt("steam-bridge skipped: {s} not found (vendor the Steamworks SDK — see README)", .{steam.?.lib_dir}),
+            b.fmt("steam-bridge/tsw-gui skipped: {s} not found (vendor the Steamworks SDK — see README)", .{steam.?.lib_dir}),
         });
         b.getInstallStep().dependOn(&warn.step);
     }
@@ -52,12 +56,8 @@ pub fn build(b: *std.Build) void {
     if (steam) |s| if (have_sdk) {
         if (!needsExternalLinker(os_tag)) installRedistributable(b, s);
         buildSteamBridge(b, target, optimize, os_tag, s);
+        buildGui(b, target, optimize, os_tag, s);
     };
-
-    // --- tsw-gui: doesn't touch Steamworks at all (see src/gui_main.zig),
-    // so it's built unconditionally like tsw-cli, independent of the SDK
-    // check above. ---
-    buildGui(b, target, optimize, os_tag);
 
     // --- tests ---
     const test_step = b.step("test", "Run tests");
@@ -186,7 +186,9 @@ fn buildGui(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     os_tag: std.Target.Os.Tag,
+    steam: SteamPlatform,
 ) void {
+    const lib_dir_abs = b.pathFromRoot(steam.lib_dir);
     // ReleaseFast (independent of our own module's optimize level) so Zig
     // doesn't instrument these vendored C/C++ sources with UBSan checks —
     // their runtime handlers (__ubsan_handle_*) only get auto-linked by
@@ -226,13 +228,14 @@ fn buildGui(
             }),
         });
 
+        const rpath_arg = b.fmt("-Wl,-rpath,{s}", .{lib_dir_abs});
         const gui_link_cmd = b.addSystemCommand(&.{"c++"});
         gui_link_cmd.addFileArg(gui_obj.getEmittedBin());
         gui_link_cmd.addFileArg(zgui_lib.getEmittedBin());
         gui_link_cmd.addFileArg(zglfw_lib.getEmittedBin());
         gui_link_cmd.addArg("-o");
         const gui_out_bin = gui_link_cmd.addOutputFileArg("tsw-gui");
-        gui_link_cmd.addArgs(&.{ "-lGL", "-lX11", "-lm" });
+        gui_link_cmd.addArgs(&.{ "-lGL", "-lX11", "-lm", "-L", lib_dir_abs, b.fmt("-l{s}", .{steam.lib_name}), rpath_arg });
 
         const install_gui = b.addInstallBinFile(gui_out_bin, "tsw-gui");
         b.getInstallStep().dependOn(&install_gui.step);
@@ -256,6 +259,8 @@ fn buildGui(
         });
         gui_exe.root_module.linkLibrary(zgui_lib);
         gui_exe.root_module.linkLibrary(zglfw_lib);
+        gui_exe.root_module.addLibraryPath(.{ .cwd_relative = lib_dir_abs });
+        gui_exe.root_module.linkSystemLibrary(steam.lib_name, .{});
         switch (os_tag) {
             .windows => {
                 gui_exe.root_module.linkSystemLibrary("opengl32", .{});
@@ -265,6 +270,7 @@ fn buildGui(
             },
             .macos => {
                 gui_exe.root_module.linkFramework("OpenGL", .{});
+                gui_exe.root_module.addRPath(.{ .cwd_relative = lib_dir_abs });
             },
             else => {},
         }

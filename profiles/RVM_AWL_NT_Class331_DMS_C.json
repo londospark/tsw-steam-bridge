@@ -1,0 +1,34 @@
+{
+  "objectClass": "RVM_AWL_NT_Class331_DMS_C",
+  "displayName": "British Rail Class 331 (DMS)",
+  "_notes": "Built from a live TSW7 session via `tsw-cli discover` + `tsw-cli get`/`set`, not guessed. Real notch counts and range came from this loco's own Function.GetNotchCount/GetMinimumInputValue/GetMaximumInputValue: PowerBrakeController is genuinely -1..1 (5 notches) unlike the Class 333's 0..1 combined handle -- confirmed by moving it live and watching InputValue snap to notch positions. MasterKey must be on and Reverser out of neutral before the loco responds to power/brake at all. No PZB/SIFA/LZB or ETCS (British EMU, not German-fitted). This unit's doors are a full guard-operated selective-door-opening (SDO) panel (PassengerDoor_FL/FR/BL/BR, GuardPanelDoor_L/R, GuardCloseDoors_L, GuardReleaseDoors_R, GuardASDO_L, GuardKey_R, DoorRelease_R, DoorsClose_L, plus per-door Open/Close Ext/Int variants) with no simple left/right toggle pair, so doors_left_toggle/doors_right_toggle are deliberately left unmapped here -- there's no clean 1:1 fit yet. Also unmapped on purpose: ReducedHorn (low-tone variant), CabLight_L/CabLight_R/CabReadingLight/ReadingLight (picked CabLight_Desk as the one 'cab light' mapping), TPWS_BrakeRelease/VigilanceIsolation/TPWS_TempIsolation (no matching logical name yet), BatteryOff, GSM-R radio panel buttons, and the guard's own signal/buzzer controls.",
+  "controls": {
+    "combined_power_brake": {
+      "path": "CurrentDrivableActor/PowerBrakeController.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 5,
+      "range": { "min": -1, "max": 1 }
+    },
+    "reverser": {
+      "path": "CurrentDrivableActor/Reverser.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 3
+    },
+    "master_key_toggle": { "path": "CurrentDrivableActor/MasterKey.InputValue", "kind": "bool" },
+    "aws_reset": { "path": "CurrentDrivableActor/AWS_Reset.InputValue", "kind": "bool" },
+    "dsd_reset": { "path": "CurrentDrivableActor/DSD_Pedal.InputValue", "kind": "bool" },
+    "dra_toggle": { "path": "CurrentDrivableActor/DRA.InputValue", "kind": "bool" },
+    "tpws_override": { "path": "CurrentDrivableActor/TPWS_TrainStopOverride.InputValue", "kind": "bool" },
+    "tpws_isolate": { "path": "CurrentDrivableActor/TPWSAWS_Isolation.InputValue", "kind": "bool" },
+    "horn": { "path": "CurrentDrivableActor/Horn.InputValue", "kind": "bool" },
+    "sander": { "path": "CurrentDrivableActor/Sanding.InputValue", "kind": "bool" },
+    "pantograph_up": { "path": "CurrentDrivableActor/PantographUp.InputValue", "kind": "bool" },
+    "pantograph_down": { "path": "CurrentDrivableActor/PantographDown.InputValue", "kind": "bool" },
+    "wipers_toggle": { "path": "CurrentDrivableActor/WindscreenWiper.InputValue", "kind": "bool" },
+    "headlights_toggle": { "path": "CurrentDrivableActor/Headlights.InputValue", "kind": "bool" },
+    "cab_light_toggle": { "path": "CurrentDrivableActor/CabLight_Desk.InputValue", "kind": "bool" },
+    "coupler_toggle": { "path": "CurrentDrivableActor/Uncouple.InputValue", "kind": "bool" }
+  }
+}

@@ -54,9 +54,15 @@ pub const Client = struct {
         var body: std.Io.Writer.Allocating = .init(self.allocator);
         errdefer body.deinit();
 
+        // std.http.Client.fetch() only sends an actual body when `payload`
+        // is non-null; otherwise it takes the bodiless send path, which
+        // asserts `!method.requestHasBody()`. PATCH always reports true
+        // there, so a bodiless PATCH (everything we send is in the path
+        // and query string) needs an explicit empty payload or it panics.
         const result = try self.http.fetch(.{
             .location = .{ .url = url },
             .method = method,
+            .payload = if (method.requestHasBody()) "" else null,
             .extra_headers = &.{
                 .{ .name = "DTGCommKey", .value = self.api_key },
             },
@@ -101,8 +107,11 @@ pub const Client = struct {
         return self.requestRaw(.PATCH, full, query);
     }
 
+    /// Confirmed live against TSW7: even a "bool" control's `InputValue`
+    /// only accepts a numeric 0/1 — sending "true"/"false" fails with
+    /// `{"Result":"Error","Message":"Invalid Value (Not a Float)"}`.
     pub fn setBool(self: *Client, path: []const u8, value: bool) RequestError!Response {
-        return self.set(path, if (value) "true" else "false");
+        return self.set(path, if (value) "1" else "0");
     }
 
     pub fn setFloat(self: *Client, path: []const u8, value: f32) RequestError!Response {

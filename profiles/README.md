@@ -16,8 +16,11 @@ This walks `CurrentDrivableActor`'s writable nodes and writes
 node name. From there:
 
 1. While parked/stationary, try each candidate with
-   `tsw-cli set <path> true` / `false` (or a float for anything that looks
-   continuous) and watch what happens in the cab.
+   `tsw-cli set <path> 1` / `0` (or a float for anything that looks
+   continuous) and watch what happens in the cab. Confirmed live: TSW's
+   `InputValue` only ever accepts a number — sending `true`/`false`
+   fails with `{"Result":"Error","Message":"Invalid Value (Not a
+   Float)"}`, even for controls that are conceptually boolean.
 2. Rename the JSON key to the matching logical name the bridge expects
    (below). Only map what this loco actually has — a British loco's
    profile won't have any `pzb_*`/`sifa_*`/`lzb_*` entries, a German
@@ -55,13 +58,15 @@ ways, controlled per-lever by a `"mode"` field on that control's profile
 entry:
 
 ```json
-"throttle": {
-  "path": "CurrentDrivableActor/Throttle_F.Value",
+"combined_power_brake": {
+  "path": "CurrentDrivableActor/CombinedPowerBrakeHandle.InputValue",
   "kind": "float",
   "mode": "notched",
-  "notches": 5
+  "notches": 9
 }
 ```
+
+(a real example, from `profiles/RVM_AWL_NT_Class333_DMSO_B_C.json` — that loco's actual notch count, read live from its own `Function.GetNotchCount`.)
 
 - **`"absolute"`** (default, or just omit `"mode"`) — reads a plain analog
   axis directly (`throttle`/`brake`/`combined_power_brake` in Steam
@@ -87,3 +92,33 @@ hand from watching the lever in the cab. `tsw-cli discover` does scan
 endpoint names for anything containing "notch"/"detent" and prints a
 heads-up if it finds one, on the chance some loco exposes it — but treat
 that as a hint to test with `tsw-cli get`, not a confirmed source.
+
+Every lever node does expose real `Function.GetNotchCount`,
+`Function.GetMinimumInputValue`, and `Function.GetMaximumInputValue`
+endpoints though (confirmed live, e.g.
+`CurrentDrivableActor/Reverser.Function.GetNotchCount` — note the
+`Function.` prefix is part of the endpoint name itself), so query those
+directly with `tsw-cli get` rather than guessing notch counts by feel.
+
+## Range varies per loco — don't assume 0..1
+
+Confirmed live across two different locomotives: a Class 333's
+`CombinedPowerBrakeHandle.InputValue` runs 0..1, but a Class 331's
+`PowerBrakeController.InputValue` is genuinely -1..1 (negative = brake,
+positive = power). There's no universal range. Always check
+`Function.GetMinimumInputValue`/`GetMaximumInputValue` for a lever before
+assuming, and if it differs from the default 0..1, add a `"range"`
+override to that control's profile entry:
+
+```json
+"combined_power_brake": {
+  "path": "CurrentDrivableActor/PowerBrakeController.InputValue",
+  "kind": "float",
+  "mode": "notched",
+  "notches": 5,
+  "range": { "min": -1, "max": 1 }
+}
+```
+
+Omit `"range"` entirely when the lever matches the compiled-in default
+(0..1 for every lever in `src/controls.zig` as of this writing).

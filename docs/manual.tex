@@ -131,9 +131,10 @@ easiest place to start.
 \section{Enabling Train Sim World's external API}
 \label{sec:tsw-api}
 
-Train Sim World ships an external control API that is not officially
-documented by Dovetail Games, but is well understood from community
-reverse-engineering. To enable it:
+Train Sim World ships a real, officially-documented external control API
+--- Dovetail's own \emph{External Interface API v1.5} document (written
+for TSW6, and confirmed working exactly as described against a live TSW7
+session while building this project). To enable it:
 
 \begin{enumerate}[leftmargin=1.5em]
     \item In Steam, open Train Sim World's properties and add
@@ -156,9 +157,9 @@ Every request to the API must include the contents of that file in a
 \code{DTGCommKey} HTTP header --- the tools in this project handle that for
 you once you point them at the file with \code{--key-file}.
 
-The API was observed listening on \code{http://localhost:31270} on Train
-Sim World 5. This is not officially documented and may differ on later
-versions; run \code{tsw-cli info} to confirm (Section~\ref{sec:cli-info}).
+The API listens on \code{http://localhost:31270} --- confirmed the same
+port on a live TSW7 session, build 834; run \code{tsw-cli info} to confirm
+it on your own install too (Section~\ref{sec:cli-info}).
 
 \section{Vendoring the Steamworks SDK}
 \label{sec:sdk}
@@ -255,13 +256,31 @@ controllable on a given loco, since names vary by locomotive class.
 \subsection{Reading and writing values}
 
 \begin{lstlisting}
-tsw-cli --key-file <key> get CurrentDrivableActor/Throttle_F.Value
-tsw-cli --key-file <key> set CurrentDrivableActor/Pantograph_F.Value true
+tsw-cli --key-file <key> get CurrentDrivableActor/Throttle_F.InputValue
+tsw-cli --key-file <key> set CurrentDrivableActor/PanUp.InputValue 1
 \end{lstlisting}
 
-Use \code{set} carefully and only while stationary until you know what a
-control actually does --- some are simple booleans, others expect a float
-in a particular range.
+The writable endpoint on every interactive control --- lever, button, or
+switch --- is always named \code{InputValue}, confirmed against DTG's own
+documentation. \textbf{It only ever accepts a number, even for a control
+that's conceptually a boolean:} sending \code{true}/\code{false} fails
+with \code{\{"Result":"Error","Message":"Invalid Value (Not a Float)"\}}
+--- use \code{1}/\code{0} instead. Use \code{set} carefully and only while
+stationary until you know what a control actually does.
+
+Every lever-style control also exposes real, documented functions for its
+own metadata --- worth querying instead of guessing:
+
+\begin{lstlisting}
+tsw-cli --key-file <key> get CurrentDrivableActor/Reverser.Function.GetNotchCount
+tsw-cli --key-file <key> get CurrentDrivableActor/Reverser.Function.GetMinimumInputValue
+tsw-cli --key-file <key> get CurrentDrivableActor/Reverser.Function.GetMaximumInputValue
+\end{lstlisting}
+
+Note that \code{Function.} is part of the endpoint name itself, not a
+separator you add. \textbf{Don't assume every lever's range is 0..1} ---
+confirmed live across two different locomotives that this varies: see the
+worked example in Section~\ref{sec:worked-examples}.
 
 \subsection{Building a locomotive profile}
 \label{sec:discover}
@@ -276,27 +295,72 @@ is that locomotive's internal class name. The skeleton lists every
 candidate writable control under its raw node name; you then:
 
 \begin{enumerate}[leftmargin=1.5em]
-    \item Test each candidate path with \code{tsw-cli set} while parked,
-    and observe what happens in the cab.
+    \item Test each candidate path with \code{tsw-cli set <path> 1} (or
+    \code{0}, or a float) while parked, and observe what happens in the
+    cab.
     \item Rename the JSON key to the matching logical name the bridge
     expects. The full, current list --- covering core cab controls plus
     British (AWS/DSD/TPWS/DRA), German (SIFA/PZB/LZB) and ETCS actions
     --- is kept in \path{profiles/README.md} rather than duplicated here,
     since it grows as the bridge's control vocabulary does.
     \item Fix \code{"kind"} to \code{"float"} for anything that isn't a
-    plain true/false.
+    plain on/off control, and add a \code{"range"} override (Section
+    \ref{sec:worked-examples}) if this control's \code{GetMinimumInputValue}/
+    \code{GetMaximumInputValue} isn't 0..1.
     \item Delete entries you don't care about mapping --- an incomplete
     profile is fine; the bridge simply skips logical controls that
     aren't mapped for the current locomotive.
 \end{enumerate}
 
+\subsection{Worked example: two real locomotive profiles}
+\label{sec:worked-examples}
+
+Two locomotive profiles ship with the project already, both built
+entirely from live TSW7 sessions using the workflow above, not guessed:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \path{profiles/RVM_AWL_NT_Class333_DMSO_B_C.json} --- British
+    Rail Class 333 (DMSO), a single-cab EMU with one combined
+    power/brake handle. Its \code{CombinedPowerBrakeHandle.InputValue}
+    runs 0..1 (9 notches, confirmed via
+    \code{Function.GetNotchCount}/\code{GetMaximumInputValue}), and its
+    \code{Reverser} is a 4-notch lever, also 0..1. No PZB/SIFA/LZB or
+    ETCS mapped --- it's a British unit that doesn't carry them.
+    \item \path{profiles/RVM_AWL_NT_Class331_DMS_C.json} --- British Rail
+    Class 331 (DMS), also a combined-handle EMU, but its
+    \code{PowerBrakeController.InputValue} genuinely reports \textbf{-1..1}
+    rather than 0..1 (5 notches) --- confirmed live by querying that
+    control's own \code{Function.GetMinimumInputValue}/
+    \code{GetMaximumInputValue}, then moving it and watching the value
+    snap to notch positions. This locomotive also needs its
+    \code{MasterKey} switched on and its \code{Reverser} moved out of
+    neutral before \code{PowerBrakeController} has any effect at all ---
+    worth checking first on any unfamiliar locomotive if power/brake
+    seems unresponsive.
+\end{itemize}
+
+Discovering the second locomotive's real range is exactly why the profile
+format has a \code{"range"} override field (Section
+\ref{sec:profile-format}) --- assuming every lever shares the first
+locomotive's 0..1 range turned out to be wrong the moment a second one
+was tested. Always check \code{GetMinimumInputValue}/
+\code{GetMaximumInputValue} on a new locomotive rather than assuming.
+
 \section{steam-bridge --- running the live bridge}
+\label{sec:steam-bridge}
 
 Once you have a locomotive profile and the Steamworks SDK vendored:
 
 \begin{lstlisting}
-zig build run-bridge -- --key-file /path/to/CommAPIKey.txt
+zig build run-bridge
 \end{lstlisting}
+
+You don't need \code{--key-file} by hand: if it's omitted,
+\code{steam-bridge} (and \code{tsw-gui}) search for \code{CommAPIKey.txt}
+themselves across every Steam library and Proton prefix they can find
+(Section~\ref{sec:tsw-api}), picking the most recently modified match if
+more than one Train Sim World version is installed. Pass \code{--key-file}
+explicitly if you need to override that.
 
 On startup, \code{steam-bridge} initializes the Steamworks API, activates
 its own \code{Driving} Steam Input action set (defined in
@@ -341,46 +405,148 @@ just as well.
 initialization against a real, running Steam client, but activating the
 custom action manifest is not yet reliably working end-to-end --- this is
 the active area of development. See the project README's ``Known gaps''
-section for the latest status.
+section for the latest status. Note that \code{tsw-gui} runs this exact
+same bridge internally (Section~\ref{sec:tsw-gui}); running both at once
+against the same controller and profile isn't useful and will have them
+race each other's \code{/set} calls, so pick one or the other.
+
+\section{Binding physical controls in Steam}
+\label{sec:steam-binding}
+
+Steam Input has no idea what a \code{combined\_power\_brake} action
+should map to on your specific controller until you tell it, and that
+binding lives entirely inside Steam's own UI --- this project never reads
+or writes controller bindings itself. It only declares what actions exist
+(\path{manifest/game_actions_480.vdf}) and polls whatever Steam reports
+for them once you've bound them.
+
+Because this is a personal, unpublished tool rather than something
+published under its own Steam app id, it identifies itself to Steam as
+Valve's public ``Spacewar'' test application, id \code{480} (Section
+\ref{sec:sdk}). That has one very concrete consequence for you: \textbf{the
+game you configure controller bindings for inside Steam is called
+``Spacewar,'' not ``Train Sim World.''}
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Install Spacewar once}, if you haven't already --- it's
+    free. From the Steam client, open the Store and search for
+    ``Spacewar,'' or navigate directly to \url{steam://install/480} and
+    install it. This doesn't launch a real game; it's a lightweight test
+    application Valve ships specifically so indie developers can exercise
+    Steam Input without owning a published app id.
+    \item \textbf{Launch \code{steam-bridge} or \code{tsw-gui}} (either
+    one). On startup it calls \code{SteamAPI\_Init} claiming app id 480,
+    so Steam now treats this project's own process as if it were Spacewar
+    currently running.
+    \item \textbf{Open Steam's controller configurator for Spacewar.} The
+    most reliable path is Big Picture Mode: Steam
+    $\rightarrow$ View $\rightarrow$ Big Picture Mode $\rightarrow$
+    Library $\rightarrow$ find Spacewar (it will show as ``Running'')
+    $\rightarrow$ the controller/gear icon $\rightarrow$ Controller
+    Options $\rightarrow$ Configure. Desktop Steam sometimes offers the
+    same screen via the controller icon in the top-right of the client
+    while \code{steam-bridge}/\code{tsw-gui} is running, but Big Picture
+    Mode is the version that reliably surfaces a game's custom action
+    manifest.
+    \item \textbf{Bind every action.} Steam shows the \code{Driving}
+    action set from \path{manifest/game_actions_480.vdf} and every action
+    it declares --- \code{combined\_power\_brake}, \code{throttle},
+    \code{brake}, \code{reverser}, all four \code{\_up}/\code{\_down}
+    notch-stepping pairs, and every digital control (\code{horn},
+    \code{aws\_reset}, \code{master\_key\_toggle}, \ldots). Bind analog
+    sticks/triggers to the three levers' absolute axes, any button/paddle
+    to the digital controls, and --- for a notched lever's tactile
+    ``rotary encoder'' feel --- a trackpad set to ``Scroll Wheel''
+    (circular) mode bound to that lever's \code{\_up}/\code{\_down} pair
+    (Section~\ref{sec:steam-bridge}).
+    \item \textbf{Save the configuration.} Steam applies it immediately;
+    \code{steam-bridge}/\code{tsw-gui} reflects your input the moment you
+    move or press a bound control, visible live in \code{tsw-gui}'s
+    panels (Section~\ref{sec:tsw-gui}).
+\end{enumerate}
+
+\textbf{Current status:} as noted at the end of
+Section~\ref{sec:steam-bridge}, this project's own call to activate its
+custom action manifest is not yet confirmed reliably working end-to-end,
+independently of everything above --- Steam Input's own initialization
+and the app-id-480 identification both work, but the custom \code{Driving}
+action set may not appear or activate correctly for you yet. If bindings
+made this way don't seem to reach \code{steam-bridge}/\code{tsw-gui}, that
+is the known gap tracked in the project README, not a step you've missed.
 
 \section{tsw-gui --- the live dashboard}
+\label{sec:tsw-gui}
 
 \code{tsw-gui} is a windowed dashboard with dockable panels, built on Dear
-ImGui. Launch it with:
+ImGui, that runs the exact same live bridge as \code{steam-bridge}
+internally --- it isn't a separate visualization of a running
+\code{steam-bridge}, it drives Steam Input and Train Sim World directly
+itself, once per rendered frame. Just run it:
+
+\begin{lstlisting}
+./zig-out/bin/tsw-gui
+\end{lstlisting}
+
+No arguments are required for a first look: it finds your key file the
+same way \code{steam-bridge} does (Section~\ref{sec:tsw-api}) and falls
+back to a clearly-labeled preview mode if nothing is found or Steam isn't
+running, rather than failing to start. Its font is bundled into the
+binary (JetBrains Mono, SIL OFL~1.1), so it looks right with no setup on
+any platform.
+
+The panels are generated from the same control list \code{steam-bridge}
+uses (\path{src/controls.zig}), so the dashboard always reflects the
+actual current set of controls, not a fixed example:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Status} --- Steam Input/controller connection, active
+    locomotive, and whether a profile was found for it.
+    \item \textbf{Power \& Brake} --- a live progress bar and mode
+    (absolute / notched / notchless) for each of the three levers.
+    \item One tabbed panel per remaining category --- Core Cab, British
+    Safety, German Safety, ETCS --- listing every control in that
+    category, colored dim if unmapped for the current locomotive, normal
+    if mapped, and in the theme's accent color while actively pressed.
+\end{itemize}
+
+Figure~\ref{fig:screenshot} shows this layout: the Status and Power \&
+Brake panels docked on the left, and the ETCS tab selected among the
+category panels on the right, themed from the Coaster theme's palette and
+set in the bundled JetBrains Mono font.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{images/tsw-gui-screenshot.png}
+    \caption{tsw-gui's default docked layout: Status and Power \& Brake
+    on the left, tabbed category panels on the right.}
+    \label{fig:screenshot}
+\end{figure}
+
+Panels can be dragged by their title bar to rearrange or dock them
+differently. The first time you run \code{tsw-gui} (before an
+\path{imgui.ini} exists in the working directory), it builds the layout
+shown above automatically; from then on, Dear ImGui saves whatever
+arrangement you leave it in to \path{imgui.ini} and restores it on
+every subsequent launch.
+
+On Linux, colors are additionally read live from your active Omarchy
+theme's \path{colors.toml} at startup rather than hardcoded, so the panel
+follows whichever theme is active system-wide; elsewhere (or on Linux
+without Omarchy) it falls back to the same colors shown here. Pass
+\code{--theme-file}/\code{--font-file} to override either explicitly, or
+on Linux use \code{scripts/run-gui.sh} to match your current Omarchy font
+specifically:
 
 \begin{lstlisting}
 ./scripts/run-gui.sh
 \end{lstlisting}
 
-This wrapper resolves whatever monospace font Omarchy currently has set
-(\code{omarchy font current}, resolved to a real font file via
-\code{fc-match}) and passes it through, so the dashboard's font always
-matches your system font without the program itself needing to know
-anything about Omarchy or fontconfig. Colors are read directly from your
-active Omarchy theme's \path{colors.toml} at startup, so the panel follows
-whichever theme is active system-wide --- nothing is hardcoded.
-
-Figure~\ref{fig:screenshot} shows the dashboard's ``Controller'' panel,
-themed from the Coaster theme's palette and set in the SlabMono Nerd Font
-variant that was active on this machine at the time.
-
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.75\textwidth]{images/tsw-gui-screenshot.png}
-    \caption{The tsw-gui Controller panel, docked and themed from the
-    active Omarchy theme.}
-    \label{fig:screenshot}
-\end{figure}
-
-Panels can be dragged by their title bar to rearrange or dock them
-together. Dear ImGui saves this layout automatically to an \path{imgui.ini}
-file in the working directory and restores it the next time you launch
-\code{tsw-gui}.
-
-\textbf{Current status:} this is a windowing/theming/layout scaffold. The
-panels shown are representative of the intended layout but are not yet
-wired to a running \code{steam-bridge}'s live data --- that is the natural
-next step once Steam Input manifest activation is working end to end.
+\textbf{Current status:} see the note at the end of
+Section~\ref{sec:steam-bridge} --- Steam Input manifest activation isn't
+reliably working end-to-end yet, so the live values shown will generally
+read as inactive/zero until that's resolved. Run only one of
+\code{tsw-gui} or \code{steam-bridge} at a time against the same
+controller and profile.
 
 \section{Troubleshooting}
 
@@ -412,22 +578,58 @@ yourself with a real \code{.ttf}/\code{.otf} path. \\
 \end{center}
 
 \section{Reference: profile file format}
+\label{sec:profile-format}
 
 Profiles live at \path{profiles/<ObjectClass>.json}:
 
 \begin{lstlisting}
 {
-  "objectClass": "RVM_CRG_DB_BR101_C",
-  "displayName": "DB BR 101",
+  "objectClass": "RVM_AWL_NT_Class331_DMS_C",
+  "displayName": "British Rail Class 331 (DMS)",
   "controls": {
-    "throttle":  { "path": "CurrentDrivableActor/Throttle_F.Value", "kind": "float" },
-    "aws_reset": { "path": "CurrentDrivableActor/AWS_F.Value",      "kind": "bool"  }
+    "combined_power_brake": {
+      "path": "CurrentDrivableActor/PowerBrakeController.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 5,
+      "range": { "min": -1, "max": 1 }
+    },
+    "reverser": {
+      "path": "CurrentDrivableActor/Reverser.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 3
+    },
+    "aws_reset": { "path": "CurrentDrivableActor/AWS_Reset.InputValue", "kind": "bool" }
   }
 }
 \end{lstlisting}
 
-\code{kind} is either \code{"bool"} or \code{"float"} and controls how the
-bridge formats the value it sends to \code{PATCH /set/...}. A logical
-control with no entry is simply never sent for that locomotive.
+(a real, verified entry from \path{profiles/RVM_AWL_NT_Class331_DMS_C.json}
+--- see the worked example in Section~\ref{sec:worked-examples}.)
+
+\begin{itemize}[leftmargin=1.5em]
+    \item \code{path} --- the full API path, always ending in
+    \code{.InputValue}.
+    \item \code{kind} --- \code{"bool"} or \code{"float"}; controls how
+    the bridge formats the value it sends to \code{PATCH /set/...}. TSW
+    itself only ever accepts a number on the wire (\code{1}/\code{0} for
+    a bool), regardless of this setting --- \code{kind} only affects how
+    the bridge reads Steam Input's own digital/analog action data for
+    this control.
+    \item \code{mode}, \code{notches}, \code{step\_size} --- only apply to
+    the three lever controls (\code{throttle}, \code{brake},
+    \code{combined\_power\_brake}, or a locomotive's own name for the
+    equivalent, like \code{reverser}); see Section~\ref{sec:steam-bridge}
+    and \path{profiles/README.md} for the full mode reference.
+    \item \code{range} --- optional \code{\{"min": ..., "max": ...\}}
+    override for a lever's \code{InputValue} bounds. Defaults to 0..1
+    (every lever's compiled-in default in \path{src/controls.zig}) when
+    omitted. \textbf{Always check, never assume:} confirmed live that
+    this genuinely varies by locomotive --- see Section
+    \ref{sec:worked-examples}.
+\end{itemize}
+
+A logical control with no entry is simply never sent for that locomotive.
 
 \end{document}

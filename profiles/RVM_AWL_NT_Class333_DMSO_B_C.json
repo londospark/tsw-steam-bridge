@@ -1,0 +1,31 @@
+{
+  "objectClass": "RVM_AWL_NT_Class333_DMSO_B_C",
+  "displayName": "British Rail Class 333 (DMSO)",
+  "_notes": "Built from a live TSW7 session via `tsw-cli discover` + `tsw-cli get`, not guessed. Real notch counts (CombinedPowerBrakeHandle=9, Reverser=4) came from that loco's own Function.GetNotchCount. Class 333 is a British EMU with a single combined power/brake handle -- there's no separate throttle/brake on this unit, so those two stay unmapped here on purpose. No PZB/SIFA/LZB or ETCS either (British, not German-fitted, no ETCS on this route/stock combo). A few controls this loco genuinely has weren't mapped: TE_Down/TE_Program/BE_Down/BE_Program (traction/brake effort programming, no matching logical name yet), CouplerLock_F, PushButton, and the various S1/S2/S3 keypad + GSM-R radio panel buttons (a whole telephone/radio panel -- out of scope for the current control vocabulary).",
+  "controls": {
+    "combined_power_brake": {
+      "path": "CurrentDrivableActor/CombinedPowerBrakeHandle.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 9
+    },
+    "reverser": {
+      "path": "CurrentDrivableActor/Reverser.InputValue",
+      "kind": "float",
+      "mode": "notched",
+      "notches": 4
+    },
+    "aws_reset": { "path": "CurrentDrivableActor/AWS_Reset.InputValue", "kind": "bool" },
+    "dsd_reset": { "path": "CurrentDrivableActor/DSD_Pedal.InputValue", "kind": "bool" },
+    "dra_toggle": { "path": "CurrentDrivableActor/DRA.InputValue", "kind": "bool" },
+    "tpws_isolate": { "path": "CurrentDrivableActor/TPWS_AWS_Isolation.InputValue", "kind": "bool" },
+    "tpws_override": { "path": "CurrentDrivableActor/TPWS_TSO.InputValue", "kind": "bool" },
+    "horn": { "path": "CurrentDrivableActor/Horn.InputValue", "kind": "bool" },
+    "pantograph_up": { "path": "CurrentDrivableActor/PanUp.InputValue", "kind": "bool" },
+    "pantograph_down": { "path": "CurrentDrivableActor/PanDown.InputValue", "kind": "bool" },
+    "wipers_toggle": { "path": "CurrentDrivableActor/WipersSwitch.InputValue", "kind": "bool" },
+    "headlights_toggle": { "path": "CurrentDrivableActor/Headlights.InputValue", "kind": "bool" },
+    "cab_light_toggle": { "path": "CurrentDrivableActor/CabLighting_L2.InputValue", "kind": "bool" },
+    "coupler_toggle": { "path": "CurrentDrivableActor/Uncouple.InputValue", "kind": "bool" }
+  }
+}

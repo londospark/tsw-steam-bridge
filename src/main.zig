@@ -9,6 +9,7 @@
 const std = @import("std");
 const tsw = @import("tsw/client.zig");
 const profile = @import("tsw/profile.zig");
+const bridge_mod = @import("bridge.zig");
 
 const default_base_url = "http://localhost:31270";
 
@@ -22,8 +23,10 @@ fn usage() void {
         \\Commands:
         \\  info                      check the API is reachable
         \\  list <path>               list nodes/endpoints under a path (e.g. CurrentDrivableActor)
-        \\  get <path>                read a value (e.g. CurrentDrivableActor/Throttle_F.Value)
-        \\  set <path> <value>        write a value (e.g. CurrentDrivableActor/Pantograph_F.Value true)
+        \\  get <path>                read a value (e.g. CurrentDrivableActor/Horn.InputValue)
+        \\  set <path> <value>        write a value (e.g. CurrentDrivableActor/PanUp.InputValue 1)
+        \\                             note: InputValue only ever accepts a number, even for
+        \\                             boolean-feeling controls -- use 1/0, not true/false
         \\  discover [out.json]       walk the current loco's writable controls into a profile skeleton
         \\
         \\Key file:
@@ -80,8 +83,12 @@ pub fn main(init: std.process.Init) !void {
         return fail("missing command", .{});
     }
 
+    if (key_file == null) {
+        key_file = bridge_mod.findKeyFile(arena, io, init.environ_map.get("HOME"), init.environ_map.get("USERPROFILE"));
+        if (key_file) |found| std.debug.print("found TSW key file: {s}\n", .{found});
+    }
     const key_path = key_file orelse return fail(
-        "no API key file given (pass --key-file or set TSW_KEY_FILE)",
+        "no API key file given or found automatically (pass --key-file or set TSW_KEY_FILE)",
         .{},
     );
     const api_key = readKeyFile(arena, io, key_path) catch |err| {
@@ -177,7 +184,9 @@ fn cmdDiscover(arena: std.mem.Allocator, io: std.Io, client: *tsw.Client, out_pa
         var parsed = std.json.parseFromSlice(std.json.Value, arena, resp.body, .{}) catch break :blk null;
         defer parsed.deinit();
         const obj = jsonObject(parsed.value) orelse break :blk null;
-        const s = jsonString(obj.get("ObjectClass") orelse break :blk null) orelse break :blk null;
+        // Confirmed live against TSW7: wrapped as {"Values":{"ObjectClass":...}}.
+        const values_obj = if (jsonObject(obj.get("Values") orelse .null)) |v| v else obj;
+        const s = jsonString(values_obj.get("ObjectClass") orelse break :blk null) orelse break :blk null;
         break :blk try arena.dupe(u8, s);
     } orelse "unknown_loco";
 
@@ -223,11 +232,17 @@ fn cmdDiscover(arena: std.mem.Allocator, io: std.Io, client: *tsw.Client, out_pa
                 std.debug.print("  possible notch-count endpoint: CurrentDrivableActor/{s}.{s} (untested — try `tsw-cli get` on it)\n", .{ node_name, ep_name });
             }
 
-            if (!std.mem.eql(u8, ep_name, "Value")) continue;
+            // Confirmed live against TSW7: the writable endpoint on every
+            // interactive control (levers, buttons, switches) is
+            // "InputValue", not "Value" — that name only ever showed up in
+            // the unverified TSW5 doc this project started from, so we
+            // still accept it as a fallback in case some node or some
+            // other TSW version genuinely uses it.
+            if (!std.mem.eql(u8, ep_name, "InputValue") and !std.mem.eql(u8, ep_name, "Value")) continue;
             const writable = ep_obj.get("Writable") orelse continue;
             if (writable != .bool or !writable.bool) continue;
 
-            const full_path = try std.fmt.allocPrint(arena, "CurrentDrivableActor/{s}.Value", .{node_name});
+            const full_path = try std.fmt.allocPrint(arena, "CurrentDrivableActor/{s}.{s}", .{ node_name, ep_name });
             try controls.append(arena, .{ .name = try arena.dupe(u8, node_name), .path = full_path });
             std.debug.print("  writable: {s}\n", .{full_path});
         }
@@ -240,7 +255,8 @@ fn cmdDiscover(arena: std.mem.Allocator, io: std.Io, client: *tsw.Client, out_pa
     std.debug.print(
         "\nwrote {d} candidate controls to {s}\n" ++
             "next: rename the keys to logical names (throttle, brake, aws_reset, dsd_reset, ...)\n" ++
-            "by testing each path with `tsw-cli set <path> true/false` (or a float) while parked,\n" ++
+            "by testing each path with `tsw-cli set <path> 1` / `0` (or a float) while parked,\n" ++
+            "(TSW's InputValue only ever accepts a number, even for boolean controls -- \"true\"/\"false\" fails)\n" ++
             "and fix \"kind\" for anything that isn't a plain bool.\n",
         .{ controls.items.len, out_path },
     );

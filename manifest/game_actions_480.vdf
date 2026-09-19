@@ -38,6 +38,11 @@
                     "title" "#Action_CombinedPowerBrake"
                     "input_mode" "joystick_move"
                 }
+                "reverser"
+                {
+                    "title" "#Action_Reverser"
+                    "input_mode" "joystick_move"
+                }
             }
 
             "AnalogTrigger"
@@ -63,6 +68,8 @@
                 "brake_down" "#Action_BrakeDown"
                 "combined_power_brake_up" "#Action_CombinedPowerBrakeUp"
                 "combined_power_brake_down" "#Action_CombinedPowerBrakeDown"
+                "reverser_up" "#Action_ReverserUp"
+                "reverser_down" "#Action_ReverserDown"
 
                 // --- Core cab controls ---
                 "horn" "#Action_Horn"
@@ -75,6 +82,7 @@
                 "doors_left_toggle" "#Action_DoorsLeftToggle"
                 "doors_right_toggle" "#Action_DoorsRightToggle"
                 "coupler_toggle" "#Action_CouplerToggle"
+                "master_key_toggle" "#Action_MasterKeyToggle"
 
                 // --- British safety systems ---
                 "aws_reset" "#Action_AwsReset"
@@ -109,12 +117,15 @@
             "action_combinedpowerbrake" "Combined Power/Brake"
             "action_throttle" "Throttle"
             "action_brake" "Brake"
+            "action_reverser" "Reverser"
             "action_throttleup" "Throttle Up (notch/step)"
             "action_throttledown" "Throttle Down (notch/step)"
             "action_brakeup" "Brake Up (notch/step)"
             "action_brakedown" "Brake Down (notch/step)"
             "action_combinedpowerbrakeup" "Combined Power/Brake Up (notch/step)"
             "action_combinedpowerbrakedown" "Combined Power/Brake Down (notch/step)"
+            "action_reverserup" "Reverser Up (notch/step)"
+            "action_reverserdown" "Reverser Down (notch/step)"
 
             "action_horn" "Horn"
             "action_sander" "Sander"
@@ -126,6 +137,7 @@
             "action_doorslefttoggle" "Doors Left"
             "action_doorsrighttoggle" "Doors Right"
             "action_couplertoggle" "Coupler"
+            "action_masterkeytoggle" "Master Key"
 
             "action_awsreset" "AWS Reset"
             "action_dsdreset" "DSD Reset"
